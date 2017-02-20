@@ -313,7 +313,7 @@ public class BetterList<T>
     /// Clear the array and release the used memory.
     /// </summary>
 
-    public void Release() { size = 0; buffer = null; }
+    public void Release() { size = 0; RecycleBuffer(); buffer = null; }
 
     /// <summary>
     /// Add the specified item to the end of the list.
