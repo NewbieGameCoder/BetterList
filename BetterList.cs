@@ -203,7 +203,7 @@ public class BetterList<T>
                 }
                 else if (buffer == null)
                 {
-                    if (curBuffer.Length >> 5 >= 2) break;
+                    //if (curBuffer.Length >> 5 >= 2) break;
                     bFond = true;
                 }
 
