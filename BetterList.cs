@@ -142,7 +142,8 @@ public class BetterList<T>
 
     public int size = 0;
 
-    static private LinkedList<T[]> bufferPool = new LinkedList<T[]>();
+    static private LinkedList<T[]> _bufferPool = new LinkedList<T[]>();
+    static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
     static private object _syncRoot;
 
     ~BetterList()
@@ -188,7 +189,7 @@ public class BetterList<T>
     void AllocateMore()
    { 
         bool bFond = false;
-        var iterNode = bufferPool.First;
+        var iterNode = _bufferPool.First;
 
         while (iterNode != null)
         {
@@ -198,12 +199,11 @@ public class BetterList<T>
             {
                 if (buffer != null && curBuffer.Length > buffer.Length)
                 {
-                    bufferPool.AddBefore(iterNode, buffer);
+                    InsertBufferNode(iterNode, buffer);
                     bFond = true;
                 }
                 else if (buffer == null)
                 {
-                    //if (curBuffer.Length >> 5 >= 2) break;
                     bFond = true;
                 }
 
@@ -216,7 +216,9 @@ public class BetterList<T>
                     }
 
                     buffer = curBuffer;
-                    bufferPool.Remove(iterNode);
+                    _bufferPool.Remove(iterNode);
+                    iterNode.Value = null;
+                    _invalidNode.AddLast(iterNode);
                     return;
                 }
             }
@@ -264,10 +266,10 @@ public class BetterList<T>
         if (buffer == null)
             return;
 
-        if (bufferPool.Count > 0)
+        if (_bufferPool.Count > 0)
         {
             bool bFond = false;
-            var iterNode = bufferPool.First;
+            var iterNode = _bufferPool.First;
 
             while (iterNode != null)
             {
@@ -275,7 +277,7 @@ public class BetterList<T>
 
                 if (curBuffer != null && curBuffer.Length > buffer.Length)
                 {
-                    bufferPool.AddBefore(iterNode, buffer);
+                    InsertBufferNode(iterNode, buffer);
                     bFond = true;
                     break;
                 }
@@ -283,12 +285,9 @@ public class BetterList<T>
                 iterNode = iterNode.Next;
             }
 
-            if (!bFond) bufferPool.AddLast(buffer);
+            if (!bFond) AppendBufferNode(buffer);
         }
-        else
-        {
-            bufferPool.AddLast(buffer);
-        }
+        else AppendBufferNode(buffer);
     }
 
     object SyncRoot
@@ -301,6 +300,38 @@ public class BetterList<T>
             }
             return _syncRoot;
         }
+    }
+
+    void AppendBufferNode(T[] recyclingBuffer)
+    {
+        LinkedListNode<T[]> newNode = null;
+        if (_invalidNode.Count > 0)
+        {
+            newNode = _invalidNode.Last;
+            _invalidNode.RemoveLast();
+            newNode.Value = recyclingBuffer;
+        }
+
+        if (newNode != null)
+            _bufferPool.AddLast(newNode);
+        else
+            _bufferPool.AddLast(recyclingBuffer);
+    }
+
+    void InsertBufferNode(LinkedListNode<T[]> baseNode, T[] recyclingBuffer)
+    {
+        LinkedListNode<T[]> newNode = null;
+        if (_invalidNode.Count > 0)
+        {
+            newNode = _invalidNode.Last;
+            _invalidNode.RemoveLast();
+            newNode.Value = recyclingBuffer;
+        }
+
+        if (newNode != null)
+            _bufferPool.AddBefore(baseNode, newNode);
+        else
+            _bufferPool.AddBefore(baseNode, recyclingBuffer);
     }
 
     /// <summary>
