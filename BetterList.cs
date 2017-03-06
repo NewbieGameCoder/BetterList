@@ -142,18 +142,6 @@ public class BetterList<T>
 
     public int size = 0;
 
-    static private LinkedList<T[]> _bufferPool = new LinkedList<T[]>();
-    static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
-    static private object _syncRoot;
-
-    ~BetterList()
-    {
-        lock (_syncRoot)
-        {
-            RecycleBuffer();
-        }
-    }
-
     /// <summary>
     /// For 'foreach' functionality.
     /// </summary>
@@ -180,158 +168,6 @@ public class BetterList<T>
     {
         get { return buffer[i]; }
         set { buffer[i] = value; }
-    }
-
-    /// <summary>
-    /// Helper function that expands the size of the array, maintaining the content.
-    /// </summary>
-
-    void AllocateMore()
-   { 
-        bool bFond = false;
-        var iterNode = _bufferPool.First;
-
-        while (iterNode != null)
-        {
-            var curBuffer = iterNode.Value;
-
-            if (curBuffer != null)
-            {
-                if (buffer != null && curBuffer.Length > buffer.Length)
-                {
-                    InsertBufferNode(iterNode, buffer);
-                    bFond = true;
-                }
-                else if (buffer == null)
-                {
-                    bFond = true;
-                }
-
-                if (bFond)
-                {
-                    if (buffer != null && size > 0)
-                    {
-                        for (int j = 0; j < buffer.Length; ++j)
-                            curBuffer[j] = buffer[j];
-                    }
-
-                    buffer = curBuffer;
-                    _bufferPool.Remove(iterNode);
-                    iterNode.Value = null;
-                    _invalidNode.AddLast(iterNode);
-                    return;
-                }
-            }
-
-            iterNode = iterNode.Next;
-        }
-
-        T[] newList = (buffer != null) ? new T[Mathf.Max(buffer.Length << 1, 32)] : new T[32];
-        if (buffer != null && size > 0)
-        {
-            for (int j = 0; j < buffer.Length; ++j)
-                newList[j] = buffer[j];
-        }
-        RecycleBuffer();
-
-        buffer = newList;
-    }
-
-    /// <summary>
-    /// Trim the unnecessary memory, resizing the buffer to be of 'Length' size.
-    /// Call this function only if you are sure that the buffer won't need to resize anytime soon.
-    /// </summary>
-
-    void Trim()
-    {
-        if (size > 0)
-        {
-            if (size < buffer.Length)
-            {
-                T[] newList = new T[size];
-                for (int i = 0; i < size; ++i) newList[i] = buffer[i];
-                RecycleBuffer();
-                buffer = newList;
-            }
-        }
-        else
-        {
-            RecycleBuffer();
-            buffer = null;
-        }
-    }
-
-    void RecycleBuffer()
-    {
-        if (buffer == null)
-            return;
-
-        if (_bufferPool.Count > 0)
-        {
-            bool bFond = false;
-            var iterNode = _bufferPool.First;
-
-            while (iterNode != null)
-            {
-                var curBuffer = iterNode.Value;
-
-                if (curBuffer != null && curBuffer.Length > buffer.Length)
-                {
-                    InsertBufferNode(iterNode, buffer);
-                    bFond = true;
-                    break;
-                }
-
-                iterNode = iterNode.Next;
-            }
-
-            if (!bFond) AppendBufferNode(buffer);
-        }
-        else AppendBufferNode(buffer);
-    }
-
-    object SyncRoot
-    {
-        get
-        {
-            if (_syncRoot == null)
-            {
-                System.Threading.Interlocked.CompareExchange<System.Object>(ref _syncRoot, new System.Object(), null);
-            }
-            return _syncRoot;
-        }
-    }
-
-    void AppendBufferNode(T[] recyclingBuffer)
-    {
-        LinkedListNode<T[]> newNode = null;
-        if (_invalidNode.Count > 0)
-        {
-            newNode = _invalidNode.Last;
-            _invalidNode.RemoveLast();
-            newNode.Value = recyclingBuffer;
-        }
-
-        if (newNode != null)
-            _bufferPool.AddLast(newNode);
-        else
-            _bufferPool.AddLast(recyclingBuffer);
-    }
-
-    void InsertBufferNode(LinkedListNode<T[]> baseNode, T[] recyclingBuffer)
-    {
-        LinkedListNode<T[]> newNode = null;
-        if (_invalidNode.Count > 0)
-        {
-            newNode = _invalidNode.Last;
-            _invalidNode.RemoveLast();
-            newNode.Value = recyclingBuffer;
-        }
-
-        if (newNode != null)
-            _bufferPool.AddBefore(baseNode, newNode);
-        else
-            _bufferPool.AddBefore(baseNode, recyclingBuffer);
     }
 
     /// <summary>
@@ -518,5 +354,167 @@ public class BetterList<T>
     /// </summary>
 
     public delegate int CompareFunc(T left, T right);
+
+    ~BetterList()
+    {
+        lock (_syncRoot)
+        {
+            RecycleBuffer();
+        }
+    }
+
+    /// <summary>
+    /// Helper function that expands the size of the array, maintaining the content.
+    /// </summary>
+
+    void AllocateMore()
+    {
+        int newBufferLength = (buffer != null) ? Mathf.Max(buffer.Length << 1, 32) : 32;
+        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(newBufferLength, false);
+
+        if (fondBufferNode != null && fondBufferNode.bufferPool.Count > 0)
+        {
+            LinkedListNode<T[]> firstNode = fondBufferNode.bufferPool.First;
+            T[] curBuffer = firstNode.Value;
+            if (buffer != null && size > 0)
+            {
+                for (int j = 0; j < size; ++j)
+                    curBuffer[j] = buffer[j];
+            }
+
+            buffer = curBuffer;
+            fondBufferNode.bufferPool.RemoveFirst();
+            firstNode.Value = null;
+            _invalidNode.AddLast(firstNode);
+            return;
+        }
+
+        T[] newList = new T[newBufferLength];
+        if (buffer != null && size > 0)
+        {
+            for (int j = 0; j < size; ++j)
+                newList[j] = buffer[j];
+        }
+
+        RecycleBuffer();
+        buffer = newList;
+    }
+
+    /// <summary>
+    /// Trim the unnecessary memory, resizing the buffer to be of 'Length' size.
+    /// Call this function only if you are sure that the buffer won't need to resize anytime soon.
+    /// </summary>
+
+    void Trim()
+    {
+        if (size > 0)
+        {
+            if (size < buffer.Length)
+            {
+                T[] newList = new T[size];
+                for (int i = 0; i < size; ++i) newList[i] = buffer[i];
+                RecycleBuffer();
+                buffer = newList;
+            }
+        }
+        else
+        {
+            RecycleBuffer();
+            buffer = null;
+        }
+    }
+
+    void RecycleBuffer()
+    {
+        if (buffer == null)
+            return;
+
+        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(buffer.Length, true);
+        AppendBufferNode(fondBufferNode.bufferPool, buffer);
+    }
+
+    object SyncRoot
+    {
+        get
+        {
+            if (_syncRoot == null)
+            {
+                System.Threading.Interlocked.CompareExchange<System.Object>(ref _syncRoot, new System.Object(), null);
+            }
+            return _syncRoot;
+        }
+    }
+
+    BufferPoolNode GetCachedBufferPoolNode(int requiredLength, bool bStrictLength)
+    {
+        BufferPoolNode fondBufferNode = null;
+
+        if (_bufferMap.Count > 0)
+        {
+            var itorNode = _bufferMap.First;
+
+            while (itorNode != null)
+            {
+                bool bNodeAvailable = bStrictLength ? itorNode.Value.bufferLength == requiredLength : itorNode.Value.bufferLength >= requiredLength;
+                if (bNodeAvailable)
+                {
+                    fondBufferNode = itorNode.Value;
+                    break;
+                }
+
+                itorNode = itorNode.Next;
+            }
+        }
+
+        if (fondBufferNode == null)
+        {
+            fondBufferNode = new BufferPoolNode();
+            fondBufferNode.bufferLength = requiredLength;
+            fondBufferNode.bufferPool = new LinkedList<T[]>();
+
+            bool bInserted = false;
+            var itorNode = _bufferMap.First;
+            while (itorNode != null)
+            {
+                if (itorNode.Value.bufferLength > requiredLength)
+                {
+                    _bufferMap.AddBefore(itorNode, fondBufferNode);
+                    bInserted = true;
+                    break;
+                }
+
+                itorNode = itorNode.Next;
+            }
+            if (!bInserted) _bufferMap.AddLast(fondBufferNode);
+        }
+
+        return fondBufferNode;
+    }
+
+    void AppendBufferNode(LinkedList<T[]> bufferPool, T[] recyclingBuffer)
+    {
+        LinkedListNode<T[]> newNode = null;
+        if (_invalidNode.Count > 0)
+        {
+            newNode = _invalidNode.Last;
+            _invalidNode.RemoveLast();
+            newNode.Value = recyclingBuffer;
+        }
+
+        if (newNode != null)
+            bufferPool.AddLast(newNode);
+        else
+            bufferPool.AddLast(recyclingBuffer);
+    }
+
+    static private object _syncRoot;
+    static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
+    static private LinkedList<BufferPoolNode> _bufferMap = new LinkedList<BufferPoolNode>();
+
+    class BufferPoolNode
+    {
+        public int bufferLength = 0;
+        public LinkedList<T[]> bufferPool = new LinkedList<T[]>();
+    }
 #endif
 }
