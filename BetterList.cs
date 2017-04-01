@@ -355,13 +355,13 @@ public class BetterList<T>
 
     public delegate int CompareFunc(T left, T right);
 
-    ~BetterList()
-    {
-        lock (_syncRoot)
-        {
-            RecycleBuffer();
-        }
-    }
+    //~BetterList()
+    //{
+    //    lock (SyncRoot)
+    //    {
+    //        RecycleBuffer();
+    //    }
+    //}
 
     /// <summary>
     /// Helper function that expands the size of the array, maintaining the content.
@@ -433,17 +433,17 @@ public class BetterList<T>
         AppendBufferNode(fondBufferNode.bufferPool, buffer);
     }
 
-    object SyncRoot
-    {
-        get
-        {
-            if (_syncRoot == null)
-            {
-                System.Threading.Interlocked.CompareExchange<System.Object>(ref _syncRoot, new System.Object(), null);
-            }
-            return _syncRoot;
-        }
-    }
+    //object SyncRoot
+    //{
+    //    get
+    //    {
+    //        if (_syncRoot == null)
+    //        {
+    //            System.Threading.Interlocked.CompareExchange<System.Object>(ref _syncRoot, new System.Object(), null);
+    //        }
+    //        return _syncRoot;
+    //    }
+    //}
 
     BufferPoolNode GetCachedBufferPoolNode(int requiredLength, bool bStrictLength)
     {
@@ -507,7 +507,7 @@ public class BetterList<T>
             bufferPool.AddLast(recyclingBuffer);
     }
 
-    static private object _syncRoot;
+    //static private object _syncRoot;
     static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
     static private LinkedList<BufferPoolNode> _bufferMap = new LinkedList<BufferPoolNode>();
 
