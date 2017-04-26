@@ -378,8 +378,7 @@ public class BetterList<T>
             T[] curBuffer = firstNode.Value;
             if (buffer != null && size > 0)
             {
-                for (int j = 0; j < size; ++j)
-                    curBuffer[j] = buffer[j];
+                Array.Copy(buffer, curBuffer, size);
             }
 
             buffer = curBuffer;
@@ -392,8 +391,7 @@ public class BetterList<T>
         T[] newList = new T[newBufferLength];
         if (buffer != null && size > 0)
         {
-            for (int j = 0; j < size; ++j)
-                newList[j] = buffer[j];
+            Array.Copy(buffer, newList, size);
         }
 
         RecycleBuffer();
@@ -412,7 +410,7 @@ public class BetterList<T>
             if (size < buffer.Length)
             {
                 T[] newList = new T[size];
-                for (int i = 0; i < size; ++i) newList[i] = buffer[i];
+                Array.Copy(buffer, newList, size);
                 RecycleBuffer();
                 buffer = newList;
             }
