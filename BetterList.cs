@@ -202,7 +202,7 @@ public class BetterList<T>
 
         if (index > -1 && index < size)
         {
-            for (int i = size; i > index; --i) buffer[i] = buffer[i - 1];
+            Array.ConstrainedCopy(buffer, index, buffer, index + 1, size - index);
             buffer[index] = item;
             ++size;
         }
@@ -216,7 +216,11 @@ public class BetterList<T>
     public bool Contains(T item)
     {
         if (buffer == null) return false;
-        for (int i = 0; i < size; ++i) if (buffer[i].Equals(item)) return true;
+        EqualityComparer<T> c = EqualityComparer<T>.Default;
+        for (int i = 0; i < size; i++)
+        {
+            if (c.Equals(buffer[i], item)) return true;
+        }
         return false;
     }
 
@@ -226,9 +230,7 @@ public class BetterList<T>
 
     public int IndexOf(T item)
     {
-        if (buffer == null) return -1;
-        for (int i = 0; i < size; ++i) if (buffer[i].Equals(item)) return i;
-        return -1;
+        return Array.IndexOf(buffer, item, 0, size);
     }
 
     /// <summary>
@@ -239,19 +241,14 @@ public class BetterList<T>
     {
         if (buffer != null)
         {
-            EqualityComparer<T> comp = EqualityComparer<T>.Default;
-
-            for (int i = 0; i < size; ++i)
+            int index = IndexOf(item);
+            if (index >= 0)
             {
-                if (comp.Equals(buffer[i], item))
-                {
-                    --size;
-                    buffer[i] = default(T);
-                    for (int b = i; b < size; ++b) buffer[b] = buffer[b + 1];
-                    buffer[size] = default(T);
-                    return true;
-                }
+                RemoveAt(index);
+                return true;
             }
+
+            return false;
         }
         return false;
     }
@@ -265,8 +262,7 @@ public class BetterList<T>
         if (buffer != null && index > -1 && index < size)
         {
             --size;
-            buffer[index] = default(T);
-            for (int b = index; b < size; ++b) buffer[b] = buffer[b + 1];
+            Array.ConstrainedCopy(buffer, index + 1, buffer, index, size - index);
             buffer[size] = default(T);
         }
     }
@@ -378,7 +374,7 @@ public class BetterList<T>
             T[] curBuffer = firstNode.Value;
             if (buffer != null && size > 0)
             {
-                Array.Copy(buffer, curBuffer, size);
+                Array.ConstrainedCopy(buffer, 0, curBuffer, 0, size);
             }
 
             buffer = curBuffer;
@@ -391,7 +387,7 @@ public class BetterList<T>
         T[] newList = new T[newBufferLength];
         if (buffer != null && size > 0)
         {
-            Array.Copy(buffer, newList, size);
+            Array.ConstrainedCopy(buffer, 0, newList, 0, size);
         }
 
         RecycleBuffer();
@@ -410,7 +406,7 @@ public class BetterList<T>
             if (size < buffer.Length)
             {
                 T[] newList = new T[size];
-                Array.Copy(buffer, newList, size);
+                Array.ConstrainedCopy(buffer, 0, newList, 0, size);
                 RecycleBuffer();
                 buffer = newList;
             }
