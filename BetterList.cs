@@ -180,7 +180,7 @@ public class BetterList<T>
     /// Clear the array and release the used memory.
     /// </summary>
 
-    public void Release() { size = 0; RecycleBuffer(); buffer = null; }
+    public void Release() { size = 0; RecycleBuffer(buffer); buffer = null; }
 
     /// <summary>
     /// Add the specified item to the end of the list.
@@ -190,6 +190,11 @@ public class BetterList<T>
     {
         if (buffer == null || size == buffer.Length) AllocateMore();
         buffer[size++] = item;
+    }
+
+    public void AddRange(T[] collection, int rangeCount)
+    {
+        InsertRange(size, collection, rangeCount);
     }
 
     /// <summary>
@@ -207,6 +212,48 @@ public class BetterList<T>
             ++size;
         }
         else Add(item);
+    }
+
+    public void InsertRange(int index, T[] collection, int rangeCount)
+    {
+        InsertRange(index, 0, collection, rangeCount);
+    }
+
+    public void InsertRange(int index, int collectionStartIndex, T[] collection, int rangeCount)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException();
+        }
+
+        if ((uint)index > (uint)size || (uint)collectionStartIndex > (uint)size)
+        {
+            throw new ArgumentOutOfRangeException();
+        }
+
+        rangeCount = Mathf.Min(collection.Length, rangeCount);
+        if (rangeCount > 0)
+        {
+            if (buffer == null || buffer.Length < size + rangeCount)
+            {
+                AllocateMore(size + rangeCount);
+            }
+
+            if (index < size)
+            {
+                Array.ConstrainedCopy(buffer, index, buffer, index + rangeCount, size - index);
+            }
+
+            if (buffer == collection)
+            {
+                Array.ConstrainedCopy(buffer, collectionStartIndex, buffer, index, rangeCount);
+            }
+            else
+            {
+                Array.ConstrainedCopy(collection, collectionStartIndex, buffer, index, rangeCount);
+            }
+            size += rangeCount;
+        }
     }
 
     /// <summary>
@@ -355,7 +402,7 @@ public class BetterList<T>
     //{
     //    lock (SyncRoot)
     //    {
-    //        RecycleBuffer();
+    //        RecycleBuffer(buffer);
     //    }
     //}
 
@@ -363,9 +410,10 @@ public class BetterList<T>
     /// Helper function that expands the size of the array, maintaining the content.
     /// </summary>
 
-    void AllocateMore()
+    void AllocateMore(int min = 1)
     {
         int newBufferLength = (buffer != null) ? Mathf.Max(buffer.Length << 1, 32) : 32;
+        if (newBufferLength < min) newBufferLength = (Mathf.Max(32, min) / 32) * 32 << 1;
         BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(newBufferLength, false);
 
         if (fondBufferNode != null && fondBufferNode.bufferPool.Count > 0)
@@ -390,11 +438,10 @@ public class BetterList<T>
             Array.ConstrainedCopy(buffer, 0, newList, 0, size);
         }
 
-        RecycleBuffer();
+        RecycleBuffer(buffer);
         buffer = newList;
     }
 
-    /// <summary>
     /// Trim the unnecessary memory, resizing the buffer to be of 'Length' size.
     /// Call this function only if you are sure that the buffer won't need to resize anytime soon.
     /// </summary>
@@ -407,24 +454,24 @@ public class BetterList<T>
             {
                 T[] newList = new T[size];
                 Array.ConstrainedCopy(buffer, 0, newList, 0, size);
-                RecycleBuffer();
+                RecycleBuffer(buffer);
                 buffer = newList;
             }
         }
         else
         {
-            RecycleBuffer();
+            RecycleBuffer(buffer);
             buffer = null;
         }
     }
 
-    void RecycleBuffer()
+    void RecycleBuffer(T[] dirtyBuffer)
     {
-        if (buffer == null)
+        if (dirtyBuffer == null)
             return;
 
-        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(buffer.Length, true);
-        AppendBufferNode(fondBufferNode.bufferPool, buffer);
+        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(dirtyBuffer.Length, true);
+        AppendBufferNode(fondBufferNode.bufferPool, dirtyBuffer);
     }
 
     //object SyncRoot
