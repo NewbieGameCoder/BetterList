@@ -223,7 +223,7 @@ public class BetterList<T>
     {
         if (collection == null)
         {
-            throw new ArgumentNullException();
+            return;
         }
 
         if ((uint)index > (uint)size || (uint)collectionStartIndex > (uint)size)
