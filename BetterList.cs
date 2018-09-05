@@ -15,6 +15,47 @@ using System;
 /// CON: BetterList performs worse when sorting the list. If your operations involve sorting, use the standard List instead.
 /// </summary>
 
+public class BufferPoolNodeList<T>
+{
+    public T[] buffer;
+    private int size = 0;
+
+    public void Add(T item)
+    {
+        if (buffer == null || size == buffer.Length) EnsureCapacity();
+        buffer[size++] = item;
+    }
+
+    public void Insert(int index, T item)
+    {
+        if (buffer == null || size == buffer.Length) EnsureCapacity();
+
+        if (index > -1 && index < size)
+        {
+            Array.ConstrainedCopy(buffer, index, buffer, index + 1, size - index);
+            buffer[index] = item;
+            ++size;
+        }
+        else Add(item);
+    }
+
+    public int Count()
+    {
+        return size;
+    }
+
+    private void EnsureCapacity()
+    {
+        int newCapacity = buffer == null ? 4 : buffer.Length << 1;
+        var newList = new T[newCapacity];
+        if (buffer != null && size > 0)
+        {
+            Array.ConstrainedCopy(buffer, 0, newList, 0, size);
+        }
+        buffer = newList;
+    }
+}
+
 public class BetterList<T>
 {
 #if UNITY_FLASH
@@ -170,6 +211,14 @@ public class BetterList<T>
         set { buffer[i] = value; }
     }
 
+    public void Reserve(int capacity)
+    {
+        if (buffer == null || buffer.Length < capacity)
+        {
+            ResizeBuffer(true, capacity);
+        }
+    }
+
     /// <summary>
     /// Clear the array by resetting its size to zero. Note that the memory is not actually released.
     /// </summary>
@@ -188,7 +237,7 @@ public class BetterList<T>
 
     public void Add(T item)
     {
-        if (buffer == null || size == buffer.Length) AllocateMore();
+        if (buffer == null || size == buffer.Length) ResizeBuffer(true);
         buffer[size++] = item;
     }
 
@@ -203,7 +252,7 @@ public class BetterList<T>
 
     public void Insert(int index, T item)
     {
-        if (buffer == null || size == buffer.Length) AllocateMore();
+        if (buffer == null || size == buffer.Length) ResizeBuffer(true);
 
         if (index > -1 && index < size)
         {
@@ -236,7 +285,7 @@ public class BetterList<T>
         {
             if (buffer == null || buffer.Length < size + rangeCount)
             {
-                AllocateMore(size + rangeCount);
+                ResizeBuffer(true, size + rangeCount);
             }
 
             if (index < size)
@@ -407,32 +456,34 @@ public class BetterList<T>
     //}
 
     /// <summary>
-    /// Helper function that expands the size of the array, maintaining the content.
+    /// Helper function that resizes the size of the array, maintaining the content.
     /// </summary>
 
-    void AllocateMore(int min = 1)
+    private void ResizeBuffer(bool bExpand, int min = 1)
     {
-        int newBufferLength = (buffer != null) ? Mathf.Max(buffer.Length << 1, 32) : 32;
-        if (newBufferLength < min) newBufferLength = (Mathf.Max(32, min) / 32) * 32 << 1;
-        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(newBufferLength, false);
+        int minLength = min;
+        int desiredLength = min;
+        if (bExpand)
+        {
+            minLength = (buffer != null) ? Mathf.Max(buffer.Length + 1, 32) : 32;
+            minLength = Mathf.Max(minLength, min);
+            desiredLength = (buffer != null) ? Mathf.Max(buffer.Length << 1, 32) : 32;
+            if (desiredLength < min) desiredLength = (Mathf.Max(32, min) / 32) * 32 << 1;
+        }
 
-        if (fondBufferNode != null && fondBufferNode.bufferPool.Count > 0)
+        T[] newList = null;
+        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(minLength, desiredLength, !bExpand);
+        bool bFond = fondBufferNode != null && fondBufferNode.bufferPool.Count > 0;
+        if (bFond)
         {
             LinkedListNode<T[]> firstNode = fondBufferNode.bufferPool.First;
-            T[] curBuffer = firstNode.Value;
-            if (buffer != null && size > 0)
-            {
-                Array.ConstrainedCopy(buffer, 0, curBuffer, 0, size);
-            }
-
-            buffer = curBuffer;
+            newList = firstNode.Value;
             fondBufferNode.bufferPool.RemoveFirst();
             firstNode.Value = null;
             _invalidNode.AddLast(firstNode);
-            return;
         }
+        else newList = new T[desiredLength];
 
-        T[] newList = new T[newBufferLength];
         if (buffer != null && size > 0)
         {
             Array.ConstrainedCopy(buffer, 0, newList, 0, size);
@@ -446,16 +497,13 @@ public class BetterList<T>
     /// Call this function only if you are sure that the buffer won't need to resize anytime soon.
     /// </summary>
 
-    void Trim()
+    private void Trim()
     {
         if (size > 0)
         {
             if (size < buffer.Length)
             {
-                T[] newList = new T[size];
-                Array.ConstrainedCopy(buffer, 0, newList, 0, size);
-                RecycleBuffer(buffer);
-                buffer = newList;
+                ResizeBuffer(false, size);
             }
         }
         else
@@ -465,12 +513,12 @@ public class BetterList<T>
         }
     }
 
-    void RecycleBuffer(T[] dirtyBuffer)
+    private void RecycleBuffer(T[] dirtyBuffer)
     {
         if (dirtyBuffer == null)
             return;
 
-        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(dirtyBuffer.Length, true);
+        BufferPoolNode fondBufferNode = GetCachedBufferPoolNode(dirtyBuffer.Length, dirtyBuffer.Length, true);
         AppendBufferNode(fondBufferNode.bufferPool, dirtyBuffer);
     }
 
@@ -486,53 +534,64 @@ public class BetterList<T>
     //    }
     //}
 
-    BufferPoolNode GetCachedBufferPoolNode(int requiredLength, bool bStrictLength)
+    private BufferPoolNode GetCachedBufferPoolNode(int minLength, int desiredLength, bool bStrictLength)
     {
+        int bufferLen = _bufferMap.Count();
         BufferPoolNode fondBufferNode = null;
-
-        if (_bufferMap.Count > 0)
+        if (bufferLen > 0)
         {
-            var itorNode = _bufferMap.First;
-
-            while (itorNode != null)
+            cachedSerchNode.bufferLength = minLength;
+            int index = Array.BinarySearch(_bufferMap.buffer, 0, bufferLen, cachedSerchNode, poolCompare);
+            int realIndex = index >= 0 ? index : ~index;
+            if (realIndex < bufferLen && !bStrictLength)
             {
-                bool bNodeAvailable = bStrictLength ? itorNode.Value.bufferLength == requiredLength : itorNode.Value.bufferLength >= requiredLength;
-                if (bNodeAvailable)
+                int len = bufferLen - 1;
+                BufferPoolNode tempNode = null;
+                do
                 {
-                    fondBufferNode = itorNode.Value;
-                    break;
+                    tempNode = _bufferMap.buffer[realIndex];
                 }
+                while (tempNode.bufferPool.Count == 0 && realIndex++ < len);
+            }
 
-                itorNode = itorNode.Next;
+            bool bNodeAvailable = realIndex < bufferLen;
+            bNodeAvailable &= bStrictLength ? index >= 0 : bNodeAvailable;
+            if (bNodeAvailable)
+            {
+                fondBufferNode = _bufferMap.buffer[realIndex];
             }
         }
 
         if (fondBufferNode == null)
         {
-            fondBufferNode = new BufferPoolNode();
-            fondBufferNode.bufferLength = requiredLength;
-            fondBufferNode.bufferPool = new LinkedList<T[]>();
-
-            bool bInserted = false;
-            var itorNode = _bufferMap.First;
-            while (itorNode != null)
+            cachedSerchNode.bufferLength = desiredLength;
+            int index = 0;
+            if (bufferLen > 0)
             {
-                if (itorNode.Value.bufferLength > requiredLength)
-                {
-                    _bufferMap.AddBefore(itorNode, fondBufferNode);
-                    bInserted = true;
-                    break;
-                }
-
-                itorNode = itorNode.Next;
+                index = Array.BinarySearch(_bufferMap.buffer, 0, bufferLen, cachedSerchNode, poolCompare);
             }
-            if (!bInserted) _bufferMap.AddLast(fondBufferNode);
+            int realIndex = index >= 0 ? index : ~index;
+
+            if (index >= 0 && bufferLen > 0)
+            {
+                fondBufferNode = _bufferMap.buffer[realIndex];
+            }
+            else if (realIndex < bufferLen)
+            {
+                fondBufferNode = CreateNewNode(desiredLength);
+                _bufferMap.Insert(realIndex, fondBufferNode);
+            }
+            else
+            {
+                fondBufferNode = CreateNewNode(desiredLength);
+                _bufferMap.Add(fondBufferNode);
+            }
         }
 
         return fondBufferNode;
     }
 
-    void AppendBufferNode(LinkedList<T[]> bufferPool, T[] recyclingBuffer)
+    private void AppendBufferNode(LinkedList<T[]> bufferPool, T[] recyclingBuffer)
     {
         LinkedListNode<T[]> newNode = null;
         if (_invalidNode.Count > 0)
@@ -548,11 +607,30 @@ public class BetterList<T>
             bufferPool.AddLast(recyclingBuffer);
     }
 
-    //static private object _syncRoot;
-    static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
-    static private LinkedList<BufferPoolNode> _bufferMap = new LinkedList<BufferPoolNode>();
+    static private BufferPoolNode CreateNewNode(int bufferLen)
+    {
+        return new BufferPoolNode()
+        {
+            bufferLength = bufferLen,
+            bufferPool = new LinkedList<T[]>()
+        };
+    }
 
-    class BufferPoolNode
+    //static private object _syncRoot;
+    static private BufferPoolNode cachedSerchNode = new BufferPoolNode();
+    static private PoolNodeCompare poolCompare = new PoolNodeCompare();
+    static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
+    static private BufferPoolNodeList<BufferPoolNode> _bufferMap = new BufferPoolNodeList<BufferPoolNode>();
+
+    private class PoolNodeCompare : IComparer<BufferPoolNode>
+    {
+        public int Compare(BufferPoolNode x, BufferPoolNode y)
+        {
+            return x.bufferLength - y.bufferLength;
+        }
+    }
+
+    private class BufferPoolNode
     {
         public int bufferLength = 0;
         public LinkedList<T[]> bufferPool = new LinkedList<T[]>();
