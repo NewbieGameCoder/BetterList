@@ -536,6 +536,8 @@ public class BetterList<T>
 
     private BufferPoolNode GetCachedBufferPoolNode(int minLength, int desiredLength, bool bStrictLength)
     {
+        CleanOldBuffer();
+
         int bufferLen = _bufferMap.Count();
         BufferPoolNode fondBufferNode = null;
         if (bufferLen > 0)
@@ -588,6 +590,8 @@ public class BetterList<T>
             }
         }
 
+        fondBufferNode.lastUsedFrame = Time.frameCount;
+
         return fondBufferNode;
     }
 
@@ -612,11 +616,42 @@ public class BetterList<T>
         return new BufferPoolNode()
         {
             bufferLength = bufferLen,
+            lastUsedFrame = Time.frameCount,
             bufferPool = new LinkedList<T[]>()
         };
     }
 
+    static private bool IsPowerOfTwo(int n)
+    {
+        return /*(n > 0) && */(n & (n - 1)) == 0;
+    }
+
+    static private void CleanOldBuffer()
+    {
+        int bufferLen = _bufferMap.Count();
+        if (Time.frameCount == lastCleanFrame || bufferLen == 0)
+        {
+            return;
+        }
+
+        lastCleanFrame = Time.frameCount;
+        if (collectIndex >= bufferLen)
+        {
+            collectIndex = 0;
+        }
+
+        var node = _bufferMap.buffer[collectIndex++];
+        if (!IsPowerOfTwo(node.bufferLength) && Time.frameCount - node.lastUsedFrame >= collectCondition)
+        {
+            node.lastUsedFrame = Time.frameCount;
+            node.bufferPool.Clear();
+        }
+    }
+
     //static private object _syncRoot;
+    static private int collectIndex;
+    static private int lastCleanFrame;
+    static private int collectCondition = 12000;
     static private BufferPoolNode cachedSerchNode = new BufferPoolNode();
     static private PoolNodeCompare poolCompare = new PoolNodeCompare();
     static private LinkedList<T[]> _invalidNode = new LinkedList<T[]>();
@@ -633,6 +668,7 @@ public class BetterList<T>
     private class BufferPoolNode
     {
         public int bufferLength = 0;
+        public int lastUsedFrame = 0;
         public LinkedList<T[]> bufferPool = new LinkedList<T[]>();
     }
 #endif
